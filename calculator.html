@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+<title>Virtual Stack Machine Calculator</title>
+<style type="text/css">
+body { font-family: DejaVu Sans, sans-serif }
+div { float: left; margin-right: 2em }
+input[type="button"] { width:90px; margin: 0.5em 0.25em }
+button { float: right }
+#examples tr :first-child { vertical-align: top; padding-right: 2em }
+
+#IN input, textarea { background-color: #F8F8F8; border: 1px solid black; padding: 0 0.5em }
+
+#VM { text-align: center }
+#RR, #IN input { border: 1px solid grey; min-width: 7em; height: 1.3em; text-align: right; padding: 0 0.5em; font: inherit }
+#IN, #IN input { float: right; margin-left: 0.5em; line-height: 1.6em; height: 1.5em }
+#CTL { margin: 0.2em auto 1.1em auto }
+#REG { margin: 0.7em auto 1.4em auto }
+#REG td { height: 1.5em }
+
+dl { border-top: 1px solid #B0B0B0 }
+dt   { background-color: #FFFFF0; text-align: right; border-bottom: 1px solid #E0E0E0; padding: 0.2em 2em 0.2em 1em }
+dt:first-child { background-color: #FFFFE0; border-color: #B0B0B0 }
+dt.B { background-color: #F0FFFF }
+dt.F { background-color: #FFF8FF }
+dt.M { background-color: #FFF0FF }
+dt.M:after { content: "«"; width: 0; display: inline-block; text-indent: 1em }
+
+p.center { text-align: center }
+#MEM, #ST, textarea, pre { font-family: DejaVu Sans Mono, DejaVu Sans, sans-serif }
+textarea { line-height: 1.5em }
+#MEM td:first-child { text-align: right; font-size: 0.8em; padding-left: 1em; padding-right: 0.5em; min-width: 6em }
+#MEM td:last-child { padding-right: 1em; padding-left: 0.5em; min-width: 9em }
+#MEM td:nth-child(2) { text-align: right; border-right: 1px solid #C0C0C0; font-size: 0.9em; padding: 0.25em 0.5em; min-width: 2em }
+#MEM td { border-bottom: 1px solid #E0E0E0 }
+#MEM tr:last-child td, #MEM tr:last-child th { border-bottom: 0 }
+#MEM { border: 2px solid #C0C0C0; border-collapse: collapse }
+#MEM .PC { background-color: #DEEEFF; font-weight: bold }
+#MEM .halted .PC { background-color: #EEEEEE }
+
+#MSG { line-height: 1.6em; min-height: 1.9em; color: #A00000; text-align: center }
+</style>
+
+</head>
+<body>
+<div>
+	<table id="CTL"><tbody>
+		<tr><td><input type="button" id="run" value="Reset" onClick="runMachine()" disabled="disabled"></td>
+			<td><input type="button" id="step" value="Step" onClick="stepMachine()" disabled="disabled"></td></tr>
+	</tbody></table>
+
+	<p id="MSG"></p>
+
+	<table id="REG"><tbody>
+		<tr><th>RR </th><td id="RR"></td></tr>
+		<tr><th>IN </th><td><span id="IN"><input size="1" style="width: 93.5%" onchange="setIN()"></span></td></tr>
+		</tbody></table>
+	<p class="center"><b>Stack</b></p>
+	<dl id="ST"></dl>
+</div>
+
+<div>
+	<p class="center"><b>Memory</b></p>
+	<table id="MEM"><tbody><tr><td></td><td>0</td><td></td></tr></tbody></table>
+</div>
+
+<div>
+<p><textarea id="calc" rows="4" cols="36"></textarea><button onclick="compileIt()">Compile<br>Expression</button></p>
+
+&nbsp; &nbsp;   8 - 3<br>
+&nbsp; &nbsp;   4 + 5 + (8 + 2) - 7<br>
+&nbsp; &nbsp;   ((-4 * (5 + (-8 + --2)) * 3) - @) % 13
+</div>
+
+<div>
+	<p><b>Assembly Code</b> <input type="button" name="b3" value="Load" onClick="loadCode()" style="float:right"></p>
+	<textarea cols="50" rows="25" id="asmCode">
+bra MAIN       // Example assembly code only!
+FAC: link 1    // int fac( int n ) {  // n stored at ldl/stl -2
+ldc 1                 // int res = 1 
+stl 1
+FLOOP: ldl -2  // while ( n > 1 ) {
+ldc 1
+gt
+brf FEND
+ldl -2                   // res = res * n;
+ldl 1
+mul
+stl 1
+ldl -2                   // n = n - 1;
+ldc 1
+sub
+stl -2
+bra FLOOP    // }
+FEND: ldl 1   // return res;
+str RR
+unlink           // }
+sts -1
+ret
+MAIN: ldc 6   // fac( 6 )
+bsr FAC
+halt
+</textarea>
+
+</div>
+
+<div>
+
+<h4>Documentation</h4>
+<p><a href="http://ascha.eu/app/sjssm/">Simple JavaScript Stack Machine</a></p>
+
+<h4>Example Programs:</h4>
+<table id="examples">
+<tr><td>
+<b>Simple Math</b>
+<pre>
+3 * 4 + 7
+</pre></td><td><pre>
+ldc 3
+ldc 4
+mul
+ldc 7
+sub
+lds 0
+str RR
+halt
+</pre></td></tr>
+<tr><td>
+<b>Simple Input</b>
+<pre>
+3 * @
+</pre></td><td><pre>
+ldc 3
+ldr IN
+mul
+lds 0
+str RR
+halt
+</pre></td></tr>
+<tr><td>
+<b>Simple Conditional</b>
+<pre>
+if 4 > 3 then 8 else 9
+</pre></td><td><pre>
+ldc 4
+ldc 3
+gt
+brf E1 // else on false
+ldc 8
+bra C1 // condition end
+E1: ldc 9
+C1: str RR
+halt
+</pre></td></tr>
+<tr><td>
+<b>Simple Function</b>
+<pre>
+func sqr(a) a * a
+sqr(5)
+</pre></td><td><pre>
+bra MAIN
+F1: link
+ldl -2
+ldl -2
+mul
+str RR
+unlink
+sts -1
+ret
+MAIN: ldc 5
+bsr F1
+ldr RR
+str RR
+halt
+</pre></td></tr>
+
+
+</table>
+
+</div>
+
+<!-- SJSSM (from http://ascha.eu/app/sjssm/) -->
+<script type="text/javascript" src="sjssm.js"></script>
+<script type="text/javascript">
+// A few utility functions and global variables for easy access to page elements.
+	function id(e) { return document.getElementById(e) }
+
+	var machine = new SJSSM,
+		asmCode = id("asmCode"),
+		step = id("step"),
+		run = id("run"),
+		MSG = id("MSG"),
+		MEM = id("MEM"),
+		ST = id("ST"),
+		RR = id("RR"),
+		IN = id("IN"),
+		reg = machine.getRegisters()
+		
+// Code to control the simple stack machine
+
+	window.onload = function() { loadCode() }
+
+	// a "callback" function to display messages and capture when the machine updates the input register
+	function showMessage(code, message) {
+		if (code == "INPUT_PROVIDED")
+			IN.firstChild.value = num(reg.IN)
+		MSG.innerHTML = message // "<b>" + code.replace(/_/g," ") + "</b><br>" + message
+	}
+
+	function setIN() {
+		reg.IN = 1*IN.firstChild.value
+		IN.firstChild.value = num(reg.IN)
+	}
+
+	function loadCode() {
+		machine.reset()
+		reg = machine.getRegisters()
+		showStack()
+		MSG.innerHTML = "";
+		machine.program(asmCode.value)
+		step.disabled=false
+		run.disabled=false
+		run.value = 'Run'
+		showMem()
+	}
+
+	function runMachine(){
+		if (run.value == 'Reset') {
+			loadCode()
+			return
+		}
+		setIN()
+		run.value = 'Continue'
+		if (!machine.run()) {
+			step.disabled=true
+			//run.disabled=true
+			run.value = 'Reset'
+		}
+		showStack()
+		showMem()
+	}
+
+	function stepMachine(){
+		setIN()
+		run.value = 'Continue'
+		if (!machine.step()) {
+			step.disabled=true
+			//run.disabled=true
+			run.value = 'Reset'
+		}
+		showStack()
+		showMem()
+	}
+
+
+    function num(x) {
+		if (x == undefined)
+			return " "
+		if (x == SJSSM.BOOL_TRUE)
+			return "T"
+		return x
+	}
+
+	function showStack(){
+		var S = machine.getStack()
+		var F = machine.frames.slice()
+		var B = machine.branches.slice()
+        var D = []
+        for (var it = S.length-1; it>= 0; it--) {
+			var x = "<dt class='"
+			if (it==F[0]) { F.shift(); x += "F " }
+			if (it==B[0]) { B.shift(); x += "B " }
+			if (it==reg.MP) { x += "M " }
+			D.push(x + "'>" + num(S[it]) +"</dt>")
+        }
+		ST.innerHTML = D.join("")
+		RR.innerHTML = num(reg.RR)
+		setIN()
+    }
+
+	function showMem() {
+		var i
+		var C = machine.getCode()
+        var maxlabel = 0
+		for (i in machine.getCode()) {
+		  if (machine.getCode()[i].label != undefined)
+		     if (machine.getCode()[i].label.length > maxlabel)
+		         maxlabel = machine.getCode()[i].label.length
+		}
+		var mem = "<tbody>"
+		if (step.disabled)
+			mem = "<tbody class='halted'>"
+		for (i in machine.getCode()) {
+			mem += "<tr" 
+			if (i == reg.PC) mem += " class='PC'"
+			mem += "><td>"
+			if (C[i].label != undefined) mem += C[i].label
+			mem += "</td><td>" + i + "</td><td>" + machine.getCode()[i].op
+			if (C[i].param != undefined) mem += " " + C[i].param
+			mem += "</td></tr>"
+		}
+		while (i < reg.PC) {
+			i++
+			mem += "<tr"
+				if (i == reg.PC) mem += " class='PC'"
+			mem += "><td></td><td>"+i+"</td><td></td></tr>"
+		}
+		if (mem == "<tbody>" || mem == "<tbody class='halted'>")
+			mem += "<tr><td></td><td>0</td><td></td></tr>"
+		MEM.innerHTML = mem + "</tbody>"
+	}
+
+
+///////////////////////////
+
+// Utility functions - You may want to improve or change error() function
+
+
+function error(x) {
+    // very minimal error reporting, this could be improved.
+	throw(x + ": '" + VALUE + "' not expected.")
+}
+
+function appendToCode(txt) {
+    // simply add another line of text to the code area
+	asmCode.value += txt + "\n"
+}
+
+function appendLabel(lbl) {
+  asmCode.value += lbl + ": "
+}
+
+
+
+function compileIt() {
+	// start by emptying the code area
+	asmCode.value = ""
+	// load the empty code to clear memory and the stack
+	loadCode()
+	// grab the calculation input in one long string 
+	token = new Tokenizer(id("calc").value.replace(/\n/," "))
+	try {
+		calculation()   // try to parse it
+	} catch(err) {
+		showMessage("",err) // show error
+		// leave partial code but don't load it to memory
+		return
+	}
+    loadCode()  // successful so go ahead an load it into memory
+	showMessage("","Valid")
+}
+</script>
+<script type="text/javascript" src="calculator-todo-stage-2.js"></script>
+</body>
+</html>
